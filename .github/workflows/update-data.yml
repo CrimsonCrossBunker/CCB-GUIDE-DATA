@@ -1,0 +1,29 @@
+name: Update Cleanwater Bomb guide data
+
+on:
+  schedule:
+    - cron: "15 */6 * * *"
+  workflow_dispatch: {}
+
+permissions:
+  contents: write
+
+concurrency:
+  group: guide-data
+  cancel-in-progress: false
+
+jobs:
+  update:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: action
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22.x
+          cache: yarn
+      - run: yarn install --frozen-lockfile
+      - run: yarn update
+        env:
+          GITHUB_TOKEN: ${{ github.token }}

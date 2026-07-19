@@ -1,0 +1,16 @@
+{
+  "name": "ccb-guide-data",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "license": "MIT",
+  "scripts": {
+    "update": "node generate-data.mjs"
+  },
+  "dependencies": {
+    "adm-zip": "^0.5.16",
+    "gettext-parser": "^8.0.0",
+    "octokit": "^4.1.4",
+    "pinyin-pro": "^3.26.0"
+  }
+}
