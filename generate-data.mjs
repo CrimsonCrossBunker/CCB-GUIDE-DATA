@@ -31,7 +31,7 @@ if (!release) {
 const existingBuilds = await readJson("builds.json", []);
 if (
   existingBuilds[0]?.build_number === release.tag_name &&
-  existingBuilds[0]?.langs?.length
+  existingBuilds[0]?.langs?.includes("zh_CN")
 ) {
   console.log(`Guide data is already current at ${release.tag_name}`);
   process.exit(0);
