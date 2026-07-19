@@ -59,8 +59,10 @@ console.log(`Collected ${gameData.length} base-game JSON objects`);
 
 const translations = new Map();
 collectTranslations(zip, translations);
-if (translations.size === 0) {
-  console.log("Release archive has no PO catalogs; checking Actions artifacts");
+if (!translations.has("zh_CN")) {
+  console.log(
+    "Release archive lacks zh_CN; checking complete Actions artifacts",
+  );
   const { data: artifactList } =
     await github.rest.actions.listArtifactsForRepo({
       ...source,
