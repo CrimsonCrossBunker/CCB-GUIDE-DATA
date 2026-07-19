@@ -127,16 +127,22 @@ for (const [language, catalog] of translations) {
 }
 
 const treeEntries = [];
+const uploadedContent = new Map();
 for (const [path, content] of files) {
-  console.log(`Uploading ${path}`);
-  const { data: blob } = await retry(() =>
-    github.rest.git.createBlob({
-      ...destination,
-      content,
-      encoding: "utf-8",
-    }),
-  );
-  treeEntries.push({ path, mode: "100644", type: "blob", sha: blob.sha });
+  let sha = uploadedContent.get(content);
+  if (!sha) {
+    console.log(`Uploading ${path}`);
+    const { data: blob } = await retry(() =>
+      github.rest.git.createBlob({
+        ...destination,
+        content,
+        encoding: "utf-8",
+      }),
+    );
+    sha = blob.sha;
+    uploadedContent.set(content, sha);
+  }
+  treeEntries.push({ path, mode: "100644", type: "blob", sha });
 }
 
 const { data: tree } = await retry(() =>
@@ -267,17 +273,23 @@ function toPinyinCatalog(data, catalog) {
     }
   }
   for (const name of names) {
+    if (!name) continue;
     const translated = catalog[name];
     if (!translated) continue;
-    output[name] = Array.isArray(translated)
-      ? translated.map(pinyinify)
-      : pinyinify(translated);
+    if (Array.isArray(translated)) {
+      output[name] = translated
+        .filter((value) => typeof value === "string")
+        .map(pinyinify);
+    } else if (typeof translated === "string") {
+      output[name] = pinyinify(translated);
+    }
   }
   return output;
 }
 
 function pinyinify(text) {
-  return pinyin(text, { toneType: "none", type: "array" }).join(" ");
+  const result = pinyin(text, { toneType: "none", type: "array" });
+  return Array.isArray(result) ? result.join(" ") : String(result);
 }
 
 async function retry(operation, attempts = 6) {
