@@ -29,7 +29,10 @@ if (!release) {
 }
 
 const existingBuilds = await readJson("builds.json", []);
-if (existingBuilds[0]?.build_number === release.tag_name) {
+if (
+  existingBuilds[0]?.build_number === release.tag_name &&
+  existingBuilds[0]?.langs?.length
+) {
   console.log(`Guide data is already current at ${release.tag_name}`);
   process.exit(0);
 }
@@ -55,14 +58,36 @@ for (const entry of zip.getEntries()) {
 console.log(`Collected ${gameData.length} base-game JSON objects`);
 
 const translations = new Map();
-for (const entry of zip.getEntries()) {
-  if (entry.isDirectory) continue;
-  const filename = stripArchiveRoot(entry.entryName);
-  const match = /^lang\/po\/([^/]+)\.po$/i.exec(filename);
-  if (!match) continue;
-  const language = match[1];
-  const catalog = gettextParser.po.parse(entry.getData());
-  translations.set(language, toJedCatalog(catalog));
+collectTranslations(zip, translations);
+if (translations.size === 0) {
+  console.log("Release archive has no PO catalogs; checking Actions artifacts");
+  const { data: artifactList } =
+    await github.rest.actions.listArtifactsForRepo({
+      ...source,
+      name: "translations",
+      per_page: 100,
+    });
+  const artifact = artifactList.artifacts.find(
+    (candidate) =>
+      !candidate.expired &&
+      candidate.workflow_run?.head_sha === release.target_commitish,
+  );
+  if (artifact) {
+    const { data: artifactArchive } =
+      await github.rest.actions.downloadArtifact({
+        ...source,
+        artifact_id: artifact.id,
+        archive_format: "zip",
+      });
+    collectTranslations(
+      new AdmZip(Buffer.from(artifactArchive)),
+      translations,
+    );
+  } else {
+    console.warn(
+      `No translations artifact matched ${release.target_commitish}`,
+    );
+  }
 }
 console.log(`Collected ${translations.size} language catalogs`);
 
@@ -156,6 +181,18 @@ async function readJson(path, fallback) {
 
 function stripArchiveRoot(filename) {
   return filename.replaceAll("\\", "/").split("/").slice(1).join("/");
+}
+
+function collectTranslations(archive, output) {
+  for (const entry of archive.getEntries()) {
+    if (entry.isDirectory) continue;
+    const filename = entry.entryName.replaceAll("\\", "/");
+    const match = /(?:^|\/)lang\/po\/([^/]+)\.po$/i.exec(filename);
+    if (!match) continue;
+    const language = match[1];
+    const catalog = gettextParser.po.parse(entry.getData());
+    output.set(language, toJedCatalog(catalog));
+  }
 }
 
 function extractObjects(text) {
