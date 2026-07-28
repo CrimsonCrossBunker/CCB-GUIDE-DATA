@@ -14,10 +14,12 @@ release in the following locations:
 
 Each update adds new files to the existing data tree and advances the branch
 with a normal parent commit, so previously generated releases remain
-selectable. Scheduled runs process up to four missing releases at a time,
+selectable. Scheduled runs process up to sixteen missing releases at a time,
 starting with the newest, which also backfills releases created before history
 retention was enabled. A manual run is available from the Actions tab with a
-configurable batch size of up to 20 releases.
+configurable batch size of up to 20 releases. Each release is uploaded before
+generation continues, so batch backfills do not retain several complete
+release payloads in memory at once.
 
 The generator records a data format version in `builds.json`. When the format
 changes, older entries are regenerated in batches without removing their

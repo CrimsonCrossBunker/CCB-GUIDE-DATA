@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 export const DATA_FORMAT_VERSION = 2;
 
 export function toJedCatalog(parsed) {
@@ -56,7 +58,7 @@ export function selectPendingReleases(releases, existingBuilds, batchSize) {
     .slice(0, batchSize);
 }
 
-export function parseReleaseBatchSize(value, fallback = 4, maximum = 20) {
+export function parseReleaseBatchSize(value, fallback = 16, maximum = 20) {
   const parsed = value == null || value === "" ? fallback : Number(value);
   if (!Number.isInteger(parsed) || parsed < 1 || parsed > maximum) {
     throw new Error(
@@ -64,4 +66,11 @@ export function parseReleaseBatchSize(value, fallback = 4, maximum = 20) {
     );
   }
   return parsed;
+}
+
+export function gitBlobId(content) {
+  return createHash("sha1")
+    .update(`blob ${Buffer.byteLength(content, "utf8")}\0`)
+    .update(content, "utf8")
+    .digest("hex");
 }

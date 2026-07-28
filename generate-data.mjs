@@ -5,6 +5,7 @@ import { pinyin } from "pinyin-pro";
 
 import {
   buildRecord,
+  gitBlobId,
   mergeBuilds,
   parseReleaseBatchSize,
   selectPendingReleases,
@@ -55,8 +56,9 @@ console.log(
     .join(", ")}`,
 );
 const latestRelease = releases[0];
-const files = new Map();
 const generatedBuilds = [];
+const treeEntries = [];
+const uploadedContent = new Map();
 
 for (const release of pendingReleases) {
   const { gameData, translations } = await generateRelease(release);
@@ -67,25 +69,31 @@ for (const release of pendingReleases) {
     release,
     data: gameData,
   });
-  files.set(`data/${release.tag_name}/all.json`, allJson);
+  const allJsonSha = await addFile(
+    `data/${release.tag_name}/all.json`,
+    allJson,
+  );
   if (release.tag_name === latestRelease.tag_name) {
-    files.set("data/latest/all.json", allJson);
+    addTreeEntry("data/latest/all.json", allJsonSha);
   }
 
   for (const [language, catalog] of translations) {
     const json = JSON.stringify(catalog);
-    files.set(`data/${release.tag_name}/lang/${language}.json`, json);
+    const translationSha = await addFile(
+      `data/${release.tag_name}/lang/${language}.json`,
+      json,
+    );
     if (release.tag_name === latestRelease.tag_name) {
-      files.set(`data/latest/lang/${language}.json`, json);
+      addTreeEntry(`data/latest/lang/${language}.json`, translationSha);
     }
     if (language.startsWith("zh_")) {
       const pinyinJson = JSON.stringify(toPinyinCatalog(gameData, catalog));
-      files.set(
+      const pinyinSha = await addFile(
         `data/${release.tag_name}/lang/${language}_pinyin.json`,
         pinyinJson,
       );
       if (release.tag_name === latestRelease.tag_name) {
-        files.set(`data/latest/lang/${language}_pinyin.json`, pinyinJson);
+        addTreeEntry(`data/latest/lang/${language}_pinyin.json`, pinyinSha);
       }
     }
   }
@@ -93,13 +101,12 @@ for (const release of pendingReleases) {
 
 const builds = mergeBuilds(existingBuilds, generatedBuilds);
 const buildsJson = JSON.stringify(builds);
-files.set("all-builds.json", buildsJson);
-files.set("builds.json", buildsJson);
+const buildsSha = await addFile("all-builds.json", buildsJson);
+addTreeEntry("builds.json", buildsSha);
 
-const treeEntries = [];
-const uploadedContent = new Map();
-for (const [path, content] of files) {
-  let sha = uploadedContent.get(content);
+async function addFile(path, content) {
+  const contentId = gitBlobId(content);
+  let sha = uploadedContent.get(contentId);
   if (!sha) {
     console.log(`Uploading ${path}`);
     const { data: blob } = await retry(() =>
@@ -110,8 +117,13 @@ for (const [path, content] of files) {
       }),
     );
     sha = blob.sha;
-    uploadedContent.set(content, sha);
+    uploadedContent.set(contentId, sha);
   }
+  addTreeEntry(path, sha);
+  return sha;
+}
+
+function addTreeEntry(path, sha) {
   treeEntries.push({ path, mode: "100644", type: "blob", sha });
 }
 

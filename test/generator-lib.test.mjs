@@ -5,6 +5,7 @@ import gettextParser from "gettext-parser";
 import {
   DATA_FORMAT_VERSION,
   buildRecord,
+  gitBlobId,
   mergeBuilds,
   parseReleaseBatchSize,
   selectPendingReleases,
@@ -97,11 +98,16 @@ test("mergeBuilds replaces regenerated builds and keeps newest first", () => {
 });
 
 test("parseReleaseBatchSize validates workflow input", () => {
-  assert.equal(parseReleaseBatchSize(undefined), 4);
+  assert.equal(parseReleaseBatchSize(undefined), 16);
   assert.equal(parseReleaseBatchSize("12"), 12);
   assert.throws(() => parseReleaseBatchSize("0"), /between 1 and 20/);
   assert.throws(() => parseReleaseBatchSize("21"), /between 1 and 20/);
   assert.throws(() => parseReleaseBatchSize("many"), /between 1 and 20/);
+});
+
+test("gitBlobId matches Git hash-object for UTF-8 content", () => {
+  assert.equal(gitBlobId("中文\n"), "0c3dd90b19be56e9cd94f052f74526aac2458521");
+  assert.equal(gitBlobId(""), "e69de29bb2d1d6434b8b29ae775ad8c2e48c5391");
 });
 
 function release(tag_name, created_at = "2026-07-28T04:26:07Z") {
