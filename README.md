@@ -4,17 +4,24 @@ Generated data for the
 [Cataclysm: Cleanwater Bomb Guide](https://github.com/CrimsonCrossBunker/CCB-GUIDE).
 
 The `action` branch contains the generator and scheduled GitHub Actions
-workflow. The generated `main` branch contains only the most recent Cleanwater
-Bomb release in the following locations:
+workflow. The generated `main` branch keeps every processed Cleanwater Bomb
+release in the following locations:
 
 - `builds.json`
 - `data/latest/all.json`
 - `data/latest/lang/<locale>.json`
 - `data/<release>/...`
 
-Keeping a single release bounds repository growth while allowing the guide to
-update automatically every six hours. A manual run is also available from the
-Actions tab.
+Each update adds new files to the existing data tree and advances the branch
+with a normal parent commit, so previously generated releases remain
+selectable. Scheduled runs process up to four missing releases at a time,
+starting with the newest, which also backfills releases created before history
+retention was enabled. A manual run is available from the Actions tab with a
+configurable batch size of up to 20 releases.
+
+The generator records a data format version in `builds.json`. When the format
+changes, older entries are regenerated in batches without removing their
+existing data until the replacement is ready.
 
 ## Attribution and licensing
 

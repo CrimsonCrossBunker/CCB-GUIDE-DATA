@@ -5,6 +5,7 @@
   "type": "module",
   "license": "MIT",
   "scripts": {
+    "test": "node --test",
     "update": "node generate-data.mjs"
   },
   "dependencies": {

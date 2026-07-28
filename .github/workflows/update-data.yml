@@ -3,7 +3,12 @@ name: Update Cleanwater Bomb guide data
 on:
   schedule:
     - cron: "15 */6 * * *"
-  workflow_dispatch: {}
+  workflow_dispatch:
+    inputs:
+      release_batch_size:
+        description: Number of missing releases to generate (1-20)
+        required: false
+        default: "10"
 
 permissions:
   contents: write
@@ -24,6 +29,8 @@ jobs:
           node-version: 22.x
           cache: yarn
       - run: yarn install --frozen-lockfile
+      - run: yarn test
       - run: yarn update
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          RELEASE_BATCH_SIZE: ${{ inputs.release_batch_size || '4' }}

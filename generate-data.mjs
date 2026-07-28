@@ -3,6 +3,14 @@ import gettextParser from "gettext-parser";
 import { Octokit } from "octokit";
 import { pinyin } from "pinyin-pro";
 
+import {
+  buildRecord,
+  mergeBuilds,
+  parseReleaseBatchSize,
+  selectPendingReleases,
+  toJedCatalog,
+} from "./generator-lib.mjs";
+
 const source = {
   owner: "CrimsonCrossBunker",
   repo: "Cataclysm-Cleanwater-Bomb",
@@ -19,112 +27,74 @@ if (!process.env.GITHUB_TOKEN) {
   throw new Error("GITHUB_TOKEN is required");
 }
 
-const { data: releases } = await github.rest.repos.listReleases({
-  ...source,
-  per_page: 10,
-});
-const release = releases[0];
-if (!release) {
+const releases = (
+  await github.paginate(github.rest.repos.listReleases, {
+    ...source,
+    per_page: 100,
+  })
+).filter((release) => !release.draft);
+if (!releases.length) {
   throw new Error("The Cleanwater Bomb repository has no releases");
 }
 
 const existingBuilds = await readJson("builds.json", []);
-if (
-  existingBuilds[0]?.build_number === release.tag_name &&
-  existingBuilds[0]?.langs?.includes("zh_CN")
-) {
-  console.log(`Guide data is already current at ${release.tag_name}`);
+const batchSize = parseReleaseBatchSize(process.env.RELEASE_BATCH_SIZE);
+const pendingReleases = selectPendingReleases(
+  releases,
+  existingBuilds,
+  batchSize,
+);
+if (!pendingReleases.length) {
+  console.log(`Guide data is already current at ${releases[0].tag_name}`);
   process.exit(0);
 }
 
-console.log(`Generating guide data for ${release.tag_name}`);
-const { data: archive } = await github.rest.repos.downloadZipballArchive({
-  ...source,
-  ref: release.tag_name,
-});
-const zip = new AdmZip(Buffer.from(archive));
+console.log(
+  `Generating ${pendingReleases.length} release(s): ${pendingReleases
+    .map((release) => release.tag_name)
+    .join(", ")}`,
+);
+const latestRelease = releases[0];
+const files = new Map();
+const generatedBuilds = [];
 
-const gameData = [];
-for (const entry of zip.getEntries()) {
-  if (entry.isDirectory) continue;
-  const filename = stripArchiveRoot(entry.entryName);
-  if (!/^data\/json\/.*\.json$/i.test(filename)) continue;
-  const text = entry.getData().toString("utf8");
-  for (const record of extractObjects(text)) {
-    record.value.__filename = `${filename}#L${record.start}-L${record.end}`;
-    gameData.push(record.value);
+for (const release of pendingReleases) {
+  const { gameData, translations } = await generateRelease(release);
+  generatedBuilds.push(buildRecord(release, translations));
+
+  const allJson = JSON.stringify({
+    build_number: release.tag_name,
+    release,
+    data: gameData,
+  });
+  files.set(`data/${release.tag_name}/all.json`, allJson);
+  if (release.tag_name === latestRelease.tag_name) {
+    files.set("data/latest/all.json", allJson);
+  }
+
+  for (const [language, catalog] of translations) {
+    const json = JSON.stringify(catalog);
+    files.set(`data/${release.tag_name}/lang/${language}.json`, json);
+    if (release.tag_name === latestRelease.tag_name) {
+      files.set(`data/latest/lang/${language}.json`, json);
+    }
+    if (language.startsWith("zh_")) {
+      const pinyinJson = JSON.stringify(toPinyinCatalog(gameData, catalog));
+      files.set(
+        `data/${release.tag_name}/lang/${language}_pinyin.json`,
+        pinyinJson,
+      );
+      if (release.tag_name === latestRelease.tag_name) {
+        files.set(`data/latest/lang/${language}_pinyin.json`, pinyinJson);
+      }
+    }
   }
 }
-console.log(`Collected ${gameData.length} base-game JSON objects`);
 
-const translations = new Map();
-collectTranslations(zip, translations);
-if (!translations.has("zh_CN")) {
-  console.log(
-    "Release archive lacks zh_CN; checking complete Actions artifacts",
-  );
-  const { data: artifactList } =
-    await github.rest.actions.listArtifactsForRepo({
-      ...source,
-      name: "translations",
-      per_page: 100,
-    });
-  const artifact = artifactList.artifacts.find(
-    (candidate) =>
-      !candidate.expired &&
-      candidate.workflow_run?.head_sha === release.target_commitish,
-  );
-  if (artifact) {
-    const { data: artifactArchive } =
-      await github.rest.actions.downloadArtifact({
-        ...source,
-        artifact_id: artifact.id,
-        archive_format: "zip",
-      });
-    collectTranslations(
-      new AdmZip(Buffer.from(artifactArchive)),
-      translations,
-    );
-  } else {
-    console.warn(
-      `No translations artifact matched ${release.target_commitish}`,
-    );
-  }
-}
-console.log(`Collected ${translations.size} language catalogs`);
-
-const build = {
-  build_number: release.tag_name,
-  prerelease: release.prerelease,
-  created_at: release.created_at,
-  langs: [...translations.keys()].sort(),
-};
-const allJson = JSON.stringify({
-  build_number: release.tag_name,
-  release,
-  data: gameData,
-});
-
-const files = new Map([
-  ["all-builds.json", JSON.stringify([build])],
-  ["builds.json", JSON.stringify([build])],
-  [`data/${release.tag_name}/all.json`, allJson],
-  ["data/latest/all.json", allJson],
-]);
-
-for (const [language, catalog] of translations) {
-  const json = JSON.stringify(catalog);
-  files.set(`data/${release.tag_name}/lang/${language}.json`, json);
-  files.set(`data/latest/lang/${language}.json`, json);
-  if (language.startsWith("zh_")) {
-    const pinyinJson = JSON.stringify(toPinyinCatalog(gameData, catalog));
-    files.set(
-      `data/${release.tag_name}/lang/${language}_pinyin.json`,
-      pinyinJson,
-    );
-    files.set(`data/latest/lang/${language}_pinyin.json`, pinyinJson);
-  }
-}
+const builds = mergeBuilds(existingBuilds, generatedBuilds);
+const buildsJson = JSON.stringify(builds);
+files.set("all-builds.json", buildsJson);
+files.set("builds.json", buildsJson);
 
 const treeEntries = [];
 const uploadedContent = new Map();
@@ -145,14 +115,22 @@ for (const [path, content] of files) {
   treeEntries.push({ path, mode: "100644", type: "blob", sha });
 }
 
+const branchState = await getDataBranchState();
 const { data: tree } = await retry(() =>
-  github.rest.git.createTree({ ...destination, tree: treeEntries }),
+  github.rest.git.createTree({
+    ...destination,
+    base_tree: branchState?.treeSha,
+    tree: treeEntries,
+  }),
 );
 const { data: commit } = await github.rest.git.createCommit({
   ...destination,
-  message: `Generate guide data for ${release.tag_name}`,
+  message:
+    pendingReleases.length === 1
+      ? `Generate guide data for ${pendingReleases[0].tag_name}`
+      : `Generate ${pendingReleases.length} guide data releases`,
   tree: tree.sha,
-  parents: [],
+  parents: branchState ? [branchState.commitSha] : [],
   author: {
     name: "CCB Guide Data Bot",
     email: "ccb-guide-data@users.noreply.github.com",
@@ -162,9 +140,11 @@ await github.rest.git.updateRef({
   ...destination,
   ref: `heads/${dataBranch}`,
   sha: commit.sha,
-  force: true,
+  force: false,
 });
-console.log(`Published ${release.tag_name} to ${destination.owner}/${destination.repo}`);
+console.log(
+  `Published ${pendingReleases.length} release(s) to ${destination.owner}/${destination.repo}`,
+);
 
 async function readJson(path, fallback) {
   try {
@@ -185,6 +165,86 @@ async function readJson(path, fallback) {
     if (error?.status === 404) return fallback;
     throw error;
   }
+}
+
+async function getDataBranchState() {
+  try {
+    const { data: ref } = await github.rest.git.getRef({
+      ...destination,
+      ref: `heads/${dataBranch}`,
+    });
+    const { data: commit } = await github.rest.git.getCommit({
+      ...destination,
+      commit_sha: ref.object.sha,
+    });
+    return {
+      commitSha: commit.sha,
+      treeSha: commit.tree.sha,
+    };
+  } catch (error) {
+    if (error?.status === 404) return null;
+    throw error;
+  }
+}
+
+async function generateRelease(release) {
+  console.log(`Generating guide data for ${release.tag_name}`);
+  const { data: archive } = await github.rest.repos.downloadZipballArchive({
+    ...source,
+    ref: release.tag_name,
+  });
+  const zip = new AdmZip(Buffer.from(archive));
+
+  const gameData = [];
+  for (const entry of zip.getEntries()) {
+    if (entry.isDirectory) continue;
+    const filename = stripArchiveRoot(entry.entryName);
+    if (!/^data\/json\/.*\.json$/i.test(filename)) continue;
+    const text = entry.getData().toString("utf8");
+    for (const record of extractObjects(text)) {
+      record.value.__filename = `${filename}#L${record.start}-L${record.end}`;
+      gameData.push(record.value);
+    }
+  }
+  console.log(`Collected ${gameData.length} base-game JSON objects`);
+
+  const translations = new Map();
+  collectTranslations(zip, translations);
+  if (!translations.has("zh_CN")) {
+    console.log(
+      "Release archive lacks zh_CN; checking complete Actions artifacts",
+    );
+    const { data: artifactList } =
+      await github.rest.actions.listArtifactsForRepo({
+        ...source,
+        name: "translations",
+        per_page: 100,
+      });
+    const artifact = artifactList.artifacts.find(
+      (candidate) =>
+        !candidate.expired &&
+        candidate.workflow_run?.head_sha === release.target_commitish,
+    );
+    if (artifact) {
+      const { data: artifactArchive } =
+        await github.rest.actions.downloadArtifact({
+          ...source,
+          artifact_id: artifact.id,
+          archive_format: "zip",
+        });
+      collectTranslations(
+        new AdmZip(Buffer.from(artifactArchive)),
+        translations,
+      );
+    } else {
+      console.warn(
+        `No translations artifact matched ${release.target_commitish}`,
+      );
+    }
+  }
+  console.log(`Collected ${translations.size} language catalogs`);
+
+  return { gameData, translations };
 }
 
 function stripArchiveRoot(filename) {
@@ -240,24 +300,6 @@ function extractObjects(text) {
     if (character === "\n") line++;
   }
   return records;
-}
-
-function toJedCatalog(parsed) {
-  const catalog = {
-    "": {
-      language: parsed.headers.Language ?? "",
-      "plural-forms": parsed.headers["Plural-Forms"] ?? "",
-    },
-  };
-  for (const [context, messages] of Object.entries(parsed.translations)) {
-    for (const [messageId, message] of Object.entries(messages)) {
-      if (!messageId || message.msgstr.every((value) => !value)) continue;
-      const key = context ? `${context}\u0004${messageId}` : messageId;
-      catalog[key] =
-        message.msgstr.length === 1 ? message.msgstr[0] : message.msgstr;
-    }
-  }
-  return catalog;
 }
 
 function toPinyinCatalog(data, catalog) {
