@@ -5,11 +5,11 @@ export const DATA_FORMAT_VERSION = 2;
 export function toJedCatalog(parsed) {
   const catalog = {
     "": {
-      language: parsed.headers.Language ?? "",
-      "plural-forms": parsed.headers["Plural-Forms"] ?? "",
+      language: parsed.headers?.Language ?? "",
+      "plural-forms": parsed.headers?.["Plural-Forms"] ?? "",
     },
   };
-  for (const [context, messages] of Object.entries(parsed.translations)) {
+  for (const [context, messages] of Object.entries(parsed.translations ?? {})) {
     for (const [messageId, message] of Object.entries(messages)) {
       if (!messageId || message.msgstr.every((value) => !value)) continue;
       const key = context ? `${context}\u0004${messageId}` : messageId;
