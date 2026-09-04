@@ -1,6 +1,12 @@
 name: Update Cleanwater Bomb guide data
 
 on:
+  push:
+    branches: [action]
+    paths:
+      - '*.mjs'
+      - 'test/**'
+      - '.github/workflows/update-data.yml'
   schedule:
     - cron: "15 */6 * * *"
   workflow_dispatch:
@@ -33,4 +39,6 @@ jobs:
       - run: yarn update
         env:
           GITHUB_TOKEN: ${{ github.token }}
-          RELEASE_BATCH_SIZE: ${{ inputs.release_batch_size || '16' }}
+          # A generator change first publishes one current release. Scheduled
+          # runs keep backfilling older releases in their normal batches.
+          RELEASE_BATCH_SIZE: ${{ github.event_name == 'push' && '1' || inputs.release_batch_size || '16' }}

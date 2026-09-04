@@ -12,6 +12,13 @@ import {
   toJedCatalog,
 } from "../generator-lib.mjs";
 
+test("toJedCatalog accepts an empty legacy PO without headers", () => {
+  const parsed = gettextParser.po.parse(Buffer.from(""));
+  assert.deepEqual(toJedCatalog(parsed), {
+    "": { language: "", "plural-forms": "" },
+  });
+});
+
 test("toJedCatalog preserves a one-form plural as an array", () => {
   const parsed = gettextParser.po.parse(
     Buffer.from(`msgid ""
